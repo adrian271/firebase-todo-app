@@ -1,75 +1,122 @@
-import { useEffect, useState } from 'react';
-import { auth, db } from './firebase';
-import { signInAnonymously, onAuthStateChanged, type User } from 'firebase/auth';
-import { collection, getDocs } from 'firebase/firestore';
-
-type Health = {
-  authReady: boolean;
-  firestoreReady: boolean;
-  uid: string | null;
-  error: string | null;
-};
+import { useState } from "react";
+import { AuthProvider, useAuth } from "./auth/AuthProvider";
+import { SignInScreen } from "./auth/SignInScreen";
+import { friendlyAuthError } from "./auth/errorMessages";
 
 export function App() {
-  const [health, setHealth] = useState<Health>({
-    authReady: false,
-    firestoreReady: false,
-    uid: null,
-    error: null,
-  });
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user: User | null) => {
-      setHealth((h) => ({ ...h, authReady: true, uid: user?.uid ?? null }));
-    });
-
-    // Smoke-test emulator: anonymous sign-in + one read.
-    (async () => {
-      try {
-        await signInAnonymously(auth);
-        await getDocs(collection(db, 'projects'));
-        setHealth((h) => ({ ...h, firestoreReady: true }));
-      } catch (e) {
-        setHealth((h) => ({ ...h, error: (e as Error).message }));
-      }
-    })();
-
-    return () => unsub();
-  }, []);
-
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', height: '100%',
-      padding: '24px 28px', gap: 12, color: '#e8ecf3',
-    }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Firebase To-Do</h1>
-      <p style={{ fontSize: 12, color: '#8a93a3', margin: 0 }}>
-        Scaffold smoke-test. UI port lands next.
-      </p>
-      <ul style={{ fontFamily: "'Geist Mono', monospace", fontSize: 12, lineHeight: 1.7, listStyle: 'none', padding: 0, margin: '12px 0 0' }}>
-        <li>auth.ready: <Pill ok={health.authReady} /></li>
-        <li>firestore.ready: <Pill ok={health.firestoreReady} /></li>
-        <li>uid: {health.uid ?? <span style={{ color: '#5a6473' }}>—</span>}</li>
-        {health.error && (
-          <li style={{ color: '#f87171' }}>error: {health.error}</li>
-        )}
-      </ul>
-      {!health.firestoreReady && !health.error && (
-        <p style={{ fontSize: 11, color: '#5a6473', marginTop: 12 }}>
-          If this hangs: run <code style={{ background: '#1a1f28', padding: '1px 5px', borderRadius: 3 }}>npm run emulators</code> in another terminal.
-        </p>
-      )}
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
+  );
+}
+
+function AppRoutes() {
+  const { status } = useAuth();
+
+  if (status === "loading") return <LoadingScreen />;
+  if (status === "signed-out") return <SignInScreen />;
+  return <SignedInHome />;
+}
+
+function LoadingScreen() {
+  return (
+    <div style={s.loading}>
+      <p style={s.loadingText}>restoring session…</p>
     </div>
   );
 }
 
-function Pill({ ok }: { ok: boolean }) {
+function SignedInHome() {
+  const { user, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSignOut = async () => {
+    setError(null);
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch (err) {
+      setError(friendlyAuthError(err));
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
   return (
-    <span style={{
-      display: 'inline-block', padding: '0 6px', borderRadius: 3,
-      fontSize: 10, fontWeight: 600, marginLeft: 4,
-      background: ok ? 'rgba(132,204,22,.18)' : 'rgba(163,163,163,.15)',
-      color: ok ? '#bef264' : '#a3a3a3',
-    }}>{ok ? 'OK' : '…'}</span>
+    <div style={s.shell}>
+      <header style={s.header}>
+        <h1 style={s.title}>Firebase To-Do</h1>
+        <div style={s.email}>
+          {user?.email ?? (
+            <span style={s.uidMono}>{user?.uid.slice(0, 8)}</span>
+          )}
+        </div>
+        <button
+          onClick={onSignOut}
+          disabled={signingOut}
+          style={s.signOutBtn}
+        >
+          {signingOut ? "…" : "Sign out"}
+        </button>
+      </header>
+
+      <div style={s.body}>
+        <p style={s.bodyP}>You're signed in. The to-do UI lands in the next phase.</p>
+        {error && <p style={s.error}>{error}</p>}
+        <p style={s.uid}>
+          uid: <code style={s.mono}>{user?.uid}</code>
+        </p>
+      </div>
+    </div>
   );
 }
+
+const s = {
+  loading: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    color: "#5a6473",
+  } as const,
+  loadingText: {
+    fontSize: 12,
+    fontFamily: "'Geist Mono', monospace",
+    margin: 0,
+  } as const,
+  shell: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    padding: "24px 28px",
+    gap: 14,
+    color: "#e8ecf3",
+  } as const,
+  header: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    paddingBottom: 12,
+    borderBottom: "1px solid #252b35",
+  } as const,
+  title: { fontSize: 18, fontWeight: 600, margin: 0, flex: 1 } as const,
+  email: { fontSize: 12, color: "#8a93a3" } as const,
+  uidMono: { fontFamily: "'Geist Mono', monospace" } as const,
+  signOutBtn: {
+    padding: "5px 10px",
+    borderRadius: 5,
+    fontSize: 12,
+    border: "1px solid #252b35",
+    background: "#1a1f28",
+    color: "#e8ecf3",
+    font: "inherit",
+    cursor: "pointer",
+  } as const,
+  body: { fontSize: 12, color: "#8a93a3", lineHeight: 1.6 } as const,
+  bodyP: { margin: 0 } as const,
+  error: { color: "#fca5a5", marginTop: 6 } as const,
+  uid: { marginTop: 12, color: "#5a6473", fontSize: 11 } as const,
+  mono: { fontFamily: "'Geist Mono', monospace" } as const,
+};
