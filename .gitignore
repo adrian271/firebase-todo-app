@@ -1,0 +1,16 @@
+node_modules
+out
+dist
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# electron-vite intermediate
+.vite
+
+# Firebase
+.firebase
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
