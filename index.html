@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Firebase To-Do</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0a0a0a; overflow: hidden; }
+  body { font-family: 'Geist', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+  .todo-window *::-webkit-scrollbar { width: 6px; height: 6px; }
+  .todo-window *::-webkit-scrollbar-track { background: transparent; }
+  .todo-window *::-webkit-scrollbar-thumb { background: rgba(128,128,128,.3); border-radius: 3px; }
+  .todo-window *::-webkit-scrollbar-thumb:hover { background: rgba(128,128,128,.5); }
+
+  @keyframes todoPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  @keyframes todoStripePulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(239,68,68,.4); }
+    50% { opacity: 0.6; box-shadow: 0 0 0 rgba(239,68,68,0); }
+  }
+
+  input::selection, textarea::selection { background: rgba(91, 155, 255, .25); }
+
+  .todo-window {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .todo-titlebar {
+    height: 36px; flex-shrink: 0;
+    display: flex; align-items: center; padding: 0 12px;
+    gap: 10px; position: relative;
+    border-bottom: 1px solid;
+    -webkit-app-region: drag;
+  }
+  .todo-titlebar .title {
+    position: absolute; left: 0; right: 0; text-align: center;
+    font-size: 12px; font-weight: 600; pointer-events: none;
+    letter-spacing: -.005em;
+  }
+  .todo-titlebar .lights {
+    display: flex; gap: 8px; z-index: 1;
+    -webkit-app-region: no-drag;
+  }
+  .todo-titlebar .lights span {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: inset 0 0 0 .5px rgba(0,0,0,.2);
+  }
+  .todo-titlebar .controls {
+    margin-left: auto; display: flex; gap: 6px; align-items: center;
+    -webkit-app-region: no-drag; z-index: 1;
+  }
+  .todo-titlebar select, .todo-titlebar button {
+    font: inherit; font-size: 11px;
+    background: transparent; border: 1px solid transparent;
+    color: inherit; border-radius: 5px;
+    padding: 3px 7px; cursor: pointer; outline: none;
+  }
+  .todo-titlebar select:hover, .todo-titlebar button:hover {
+    background: rgba(127,127,127,.12);
+  }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="themes.js"></script>
+<script src="seed.js"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="task-row.jsx"></script>
+<script type="text/babel" src="todo-app.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState: useStateRoot, useMemo: useMemoRoot, useEffect: useEffectRoot } = React;
+
+const VARIANT_LABELS = {
+  list:    'Comfortable',
+  compact: 'Compact',
+  cards:   'Cards',
+};
+
+const STORAGE_KEY = 'firebase-todo-prefs/v1';
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { theme: 'dev-blue', dark: true, variant: 'list' };
+}
+function savePrefs(p) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch (e) {}
+}
+
+function App() {
+  const [prefs, setPrefs] = useStateRoot(loadPrefs);
+  useEffectRoot(() => { savePrefs(prefs); }, [prefs]);
+
+  const themeMeta = THEMES[prefs.theme] || THEMES['dev-blue'];
+  const supportsBoth = themeMeta.supports.length === 2;
+  const darkLocked = !supportsBoth;
+  const effectiveDark = supportsBoth ? prefs.dark : themeMeta.supports[0] === 'dark';
+
+  const resolved = useMemoRoot(() => resolveTheme(prefs.theme, effectiveDark), [prefs.theme, effectiveDark]);
+  const themeWithFonts = {
+    ...resolved,
+    tokens: {
+      ...resolved.tokens,
+      sansFont: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      monoFont: "'Geist Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace",
+    },
+  };
+  const t = themeWithFonts.tokens;
+
+  useEffectRoot(() => {
+    document.body.style.background = t.bg;
+  }, [t.bg]);
+
+  const setTheme = (v) => {
+    const next = THEMES[v];
+    const dark = next.supports.length === 1 ? next.supports[0] === 'dark' : prefs.dark;
+    setPrefs(p => ({ ...p, theme: v, dark }));
+  };
+
+  return (
+    <div className="todo-window" style={{
+      background: t.bg, color: t.text,
+      fontFamily: t.sansFont,
+    }}>
+      <div className="todo-titlebar" style={{
+        background: t.chrome,
+        borderColor: t.border,
+        color: t.textMuted,
+      }}>
+        <div className="lights">
+          <span style={{ background: '#ff5f57' }} />
+          <span style={{ background: '#febc2e' }} />
+          <span style={{ background: '#28c840' }} />
+        </div>
+        <div className="title" style={{ color: t.text }}>
+          Tasks — <span style={{ color: t.textMuted, fontWeight: 500 }}>{themeWithFonts.name}</span>
+        </div>
+        <div className="controls" style={{ color: t.textMuted }}>
+          <select
+            value={prefs.variant}
+            onChange={(e) => setPrefs(p => ({ ...p, variant: e.target.value }))}
+            title="Layout"
+            style={{ color: t.text }}
+          >
+            {Object.entries(VARIANT_LABELS).map(([k, label]) => (
+              <option key={k} value={k}>{label}</option>
+            ))}
+          </select>
+          <select
+            value={prefs.theme}
+            onChange={(e) => setTheme(e.target.value)}
+            title="Theme palette"
+            style={{ color: t.text }}
+          >
+            {Object.entries(THEMES).map(([k, v]) => (
+              <option key={k} value={k}>{v.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => { if (!darkLocked) setPrefs(p => ({ ...p, dark: !p.dark })); }}
+            disabled={darkLocked}
+            title={darkLocked ? `Locked — ${themeWithFonts.name}` : (effectiveDark ? 'Switch to light' : 'Switch to dark')}
+            style={{
+              color: t.text, opacity: darkLocked ? 0.5 : 1,
+              cursor: darkLocked ? 'not-allowed' : 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <Icon name={effectiveDark ? 'moon' : 'sun'} size={12} />
+          </button>
+        </div>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        <TodoApp variant={prefs.variant} theme={themeWithFonts} />
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>
